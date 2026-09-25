@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
 import hashlib
 import logging
+from pathlib import Path
+import ssl
 from typing import Any
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
@@ -17,6 +20,9 @@ _LOGGER = logging.getLogger(__name__)
 API_BASE_URL = "https://moapbe.spp-distribucia.sk/api/v1"
 AUTH_TOKEN_URL = "https://login.spp-distribucia.sk/oxauth/restv1/token"
 AUTH_CLIENT_ID = "40ec5358-e8d3-4ec4-8c40-eb0cfdf8208d"
+AUTH_INTERMEDIATE_CERT = (
+    Path(__file__).parent / "certs" / "thawte_tls_rsa_ca_g1.pem"
+)
 
 
 class SppGasError(Exception):
@@ -90,6 +96,7 @@ class SppGasApiClient:
             "POST",
             AUTH_TOKEN_URL,
             headers=self._base_headers(include_app_headers=False),
+            ssl=_auth_ssl_context(),
             data={
                 "grant_type": "password",
                 "client_id": AUTH_CLIENT_ID,
@@ -249,6 +256,14 @@ def _unwrap_data(payload: Any) -> Any:
     if isinstance(payload, dict) and "data" in payload:
         return payload["data"]
     return payload
+
+
+@lru_cache(maxsize=1)
+def _auth_ssl_context() -> ssl.SSLContext:
+    """Build a verified context with the intermediate omitted by SPP's server."""
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=str(AUTH_INTERMEDIATE_CERT))
+    return context
 
 
 def _extract_token(payload: Any) -> str | None:

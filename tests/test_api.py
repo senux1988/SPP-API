@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import ssl
 from types import ModuleType
 import unittest
 
@@ -110,6 +111,10 @@ class SppGasApiClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([point.id for point in points], ["point-id"])
         self.assertEqual(session.requests[0][1], AUTH_TOKEN_URL)
         self.assertEqual(session.requests[0][2]["data"]["grant_type"], "password")
+        ssl_context = session.requests[0][2]["ssl"]
+        self.assertIsInstance(ssl_context, ssl.SSLContext)
+        self.assertTrue(ssl_context.check_hostname)
+        self.assertEqual(ssl_context.verify_mode, ssl.CERT_REQUIRED)
         self.assertEqual(session.requests[1][1], f"{API_BASE_URL}/login-web")
         self.assertEqual(
             session.requests[1][2]["json"]["access_token"], "oauth-token"

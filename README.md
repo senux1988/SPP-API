@@ -159,6 +159,12 @@ Najčastejšie chyby:
 API nie je verejne dokumentované. Implementácia vychádza z komunikácie
 oficiálnej mobilnej aplikácie zachytenej cez OWASP ZAP.
 
+Prihlasovací server SPP momentálne neposiela správny intermediate TLS
+certifikát. Integrácia preto obsahuje verejný certifikát
+`Thawte TLS RSA CA G1` získaný z AIA adresy serverového certifikátu. TLS
+overovanie zostáva zapnuté vrátane kontroly hostname, platnosti certifikátu a
+dôveryhodného koreňového certifikátu.
+
 ## Vývojové overenie
 
 Jednotkové testy autentifikácie a obnovy tokenu možno spustiť príkazom:
