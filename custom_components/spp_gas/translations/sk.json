@@ -17,7 +17,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Nepodarilo sa pripojiť k SPP API.",
+      "cannot_connect": "Nepodarilo sa pripojiť k SPP API. Podrobnosti nájdete v protokoloch Home Assistantu.",
       "invalid_auth": "Prihlásenie zlyhalo. Skontrolujte e-mail a heslo.",
       "no_points": "Účet nemá dostupné odberné miesta.",
       "api_error": "SPP API vrátilo neočakávanú odpoveď. Skontrolujte protokoly Home Assistantu.",

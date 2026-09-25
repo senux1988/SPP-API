@@ -77,7 +77,10 @@ Výsledná štruktúra má vyzerať takto:
         ├── coordinator.py
         ├── manifest.json
         ├── sensor.py
-        └── strings.json
+        ├── strings.json
+        └── translations/
+            ├── en.json
+            └── sk.json
 ```
 
 Po skopírovaní reštartujte Home Assistant.

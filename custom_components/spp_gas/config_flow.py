@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -11,13 +12,21 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import SppGasApiClient, SppGasAuthError, SppGasError, SppGasPoint
+from .api import (
+    SppGasApiClient,
+    SppGasAuthError,
+    SppGasConnectionError,
+    SppGasError,
+    SppGasPoint,
+)
 from .const import (
     CONF_POINT_ID,
     CONF_POINT_NAME,
     CONF_POINT_POD,
     DOMAIN,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class SppGasConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -48,10 +57,18 @@ class SppGasConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             try:
                 self._points = await client.async_get_points()
-            except SppGasAuthError:
+            except SppGasAuthError as err:
+                _LOGGER.warning("SPP authentication failed: %s", err)
                 errors["base"] = "invalid_auth"
-            except SppGasError:
+            except SppGasConnectionError as err:
+                _LOGGER.warning("SPP connection failed: %s", err)
                 errors["base"] = "cannot_connect"
+            except SppGasError as err:
+                _LOGGER.warning("SPP setup request failed: %s", err)
+                errors["base"] = "api_error"
+            except Exception:
+                _LOGGER.exception("Unexpected error while configuring SPP Gas")
+                errors["base"] = "unknown"
             else:
                 if not self._points:
                     errors["base"] = "no_points"

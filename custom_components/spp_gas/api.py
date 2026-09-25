@@ -27,6 +27,10 @@ class SppGasAuthError(SppGasError):
     """Authentication failed."""
 
 
+class SppGasConnectionError(SppGasError):
+    """Connection to an SPP service failed."""
+
+
 @dataclass(frozen=True)
 class SppGasPoint:
     """SPP delivery point."""
@@ -232,9 +236,13 @@ class SppGasApiClient:
                 is_login_request and err.status in (400, 422)
             ):
                 raise SppGasAuthError("SPP API rejected credentials") from err
-            raise SppGasError(f"SPP API returned HTTP {err.status}") from err
+            raise SppGasError(
+                f"SPP API returned HTTP {err.status} for {url}"
+            ) from err
         except (ClientError, TimeoutError) as err:
-            raise SppGasError("Could not connect to SPP API") from err
+            raise SppGasConnectionError(
+                f"Could not connect to {url}: {err}"
+            ) from err
 
 
 def _unwrap_data(payload: Any) -> Any:

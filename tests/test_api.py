@@ -43,6 +43,7 @@ from custom_components.spp_gas.api import (  # noqa: E402
     AUTH_TOKEN_URL,
     SppGasApiClient,
     SppGasAuthError,
+    SppGasConnectionError,
 )
 
 
@@ -150,6 +151,18 @@ class SppGasApiClientTest(unittest.IsolatedAsyncioTestCase):
             session.requests[-1][2]["headers"]["Authorization"],
             "Bearer api-token-2",
         )
+
+    async def test_connection_failure_has_specific_error_type(self) -> None:
+        class FailingSession:
+            def request(self, method: str, url: str, **kwargs: object) -> None:
+                raise ClientError("DNS lookup failed")
+
+        client = SppGasApiClient(
+            FailingSession(), username="user@example.com", password="secret"
+        )
+
+        with self.assertRaisesRegex(SppGasConnectionError, AUTH_TOKEN_URL):
+            await client.async_login()
 
 
 if __name__ == "__main__":
