@@ -20,8 +20,8 @@ _LOGGER = logging.getLogger(__name__)
 API_BASE_URL = "https://moapbe.spp-distribucia.sk/api/v1"
 AUTH_TOKEN_URL = "https://login.spp-distribucia.sk/oxauth/restv1/token"
 AUTH_CLIENT_ID = "40ec5358-e8d3-4ec4-8c40-eb0cfdf8208d"
-AUTH_INTERMEDIATE_CERT = (
-    Path(__file__).parent / "certs" / "thawte_tls_rsa_ca_g1.pem"
+AUTH_CA_BUNDLE = (
+    Path(__file__).parent / "certs" / "spp_login_ca_bundle.pem"
 )
 
 
@@ -262,7 +262,7 @@ def _unwrap_data(payload: Any) -> Any:
 def _auth_ssl_context() -> ssl.SSLContext:
     """Build a verified context with the intermediate omitted by SPP's server."""
     context = ssl.create_default_context()
-    context.load_verify_locations(cafile=str(AUTH_INTERMEDIATE_CERT))
+    context.load_verify_locations(cafile=str(AUTH_CA_BUNDLE))
     return context
 
 
