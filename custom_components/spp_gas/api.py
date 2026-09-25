@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import hashlib
 import logging
 from typing import Any
 
@@ -14,6 +15,8 @@ from .const import DEFAULT_APP_VERSION
 _LOGGER = logging.getLogger(__name__)
 
 API_BASE_URL = "https://moapbe.spp-distribucia.sk/api/v1"
+AUTH_TOKEN_URL = "https://login.spp-distribucia.sk/oxauth/restv1/token"
+AUTH_CLIENT_ID = "40ec5358-e8d3-4ec4-8c40-eb0cfdf8208d"
 
 
 class SppGasError(Exception):
@@ -73,45 +76,49 @@ class SppGasApiClient:
         self._access_token = access_token
 
     async def async_login(self) -> None:
-        """Authenticate and store the bearer token.
-
-        The captured ZAP session already contained a bearer token and did not include
-        the initial OIDC login exchange. These API login candidates keep auth isolated
-        so the exact flow can be adjusted without touching the HA entity layer.
-        """
+        """Authenticate with SPP and store the mobile API bearer token."""
         if self._access_token:
             return
         if not self._username or not self._password:
             raise SppGasAuthError("Missing username or password")
 
-        payloads = (
-            {"email": self._username, "password": self._password},
-            {"username": self._username, "password": self._password},
+        oauth_response = await self._request_url(
+            "POST",
+            AUTH_TOKEN_URL,
+            headers=self._base_headers(include_app_headers=False),
+            data={
+                "grant_type": "password",
+                "client_id": AUTH_CLIENT_ID,
+                "client_secret": "",
+                "scope": "openid",
+                "username": self._username,
+                "password": self._password,
+            },
         )
-        paths = ("/customer/login", "/auth/login", "/login")
+        oauth_token = _extract_token(oauth_response)
+        if not oauth_token:
+            raise SppGasAuthError("SPP identity service did not return an access token")
 
-        last_error: Exception | None = None
-        for path in paths:
-            for payload in payloads:
-                try:
-                    response = await self._request(
-                        "POST",
-                        path,
-                        json=payload,
-                        authenticated=False,
-                    )
-                except SppGasError as err:
-                    last_error = err
-                    continue
+        login_response = await self._request(
+            "POST",
+            "/login-web",
+            authenticated=False,
+            json={
+                "access_token": oauth_token,
+                "version": DEFAULT_APP_VERSION,
+                "fcm_token": self._installation_id(),
+            },
+        )
+        api_token = _extract_token(login_response)
+        if not api_token:
+            raise SppGasAuthError("SPP mobile API did not return an access token")
+        self._access_token = api_token
 
-                token = _extract_token(response)
-                if token:
-                    self._access_token = token
-                    return
-
-        raise SppGasAuthError(
-            "SPP authentication failed; the mobile API likely uses an OIDC login flow"
-        ) from last_error
+    def _installation_id(self) -> str:
+        """Return a stable, account-specific identifier required by login-web."""
+        username = (self._username or "").strip().lower().encode()
+        digest = hashlib.sha256(username).hexdigest()
+        return f"home-assistant:{digest}"
 
     async def async_get_points(self) -> list[SppGasPoint]:
         """Return delivery points for the current account."""
@@ -160,25 +167,57 @@ class SppGasApiClient:
         authenticated: bool = True,
         **kwargs: Any,
     ) -> Any:
+        headers = self._base_headers()
+        if authenticated:
+            if not self._access_token:
+                raise SppGasAuthError("Missing access token")
+            headers["Authorization"] = f"Bearer {self._access_token}"
+
+        url = f"{API_BASE_URL}{path}"
+        try:
+            return await self._request_url(
+                method,
+                url,
+                headers=headers,
+                **kwargs,
+            )
+        except SppGasAuthError:
+            if not authenticated or not self._username or not self._password:
+                raise
+
+        self._access_token = None
+        await self.async_login()
+        headers["Authorization"] = f"Bearer {self._access_token}"
+        return await self._request_url(method, url, headers=headers, **kwargs)
+
+    def _base_headers(self, *, include_app_headers: bool = True) -> dict[str, str]:
+        """Return headers shared with the captured mobile application."""
         headers = {
             "Accept": "application/json",
-            "App-platform": "app",
-            "App-Version": DEFAULT_APP_VERSION,
             "Origin": "capacitor://localhost",
             "User-Agent": (
                 "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) "
                 "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
             ),
         }
-        if authenticated:
-            if not self._access_token:
-                raise SppGasAuthError("Missing access token")
-            headers["Authorization"] = f"Bearer {self._access_token}"
+        if include_app_headers:
+            headers["App-platform"] = "app"
+            headers["App-Version"] = DEFAULT_APP_VERSION
+        return headers
 
+    async def _request_url(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str],
+        **kwargs: Any,
+    ) -> Any:
+        """Send a request and normalize SPP API failures."""
         try:
             async with self._session.request(
                 method,
-                f"{API_BASE_URL}{path}",
+                url,
                 headers=headers,
                 timeout=30,
                 **kwargs,
@@ -188,7 +227,10 @@ class SppGasApiClient:
                     return await response.json()
                 return await response.json(content_type=None)
         except ClientResponseError as err:
-            if err.status in (401, 403):
+            is_login_request = url == AUTH_TOKEN_URL or url.endswith("/login-web")
+            if err.status in (401, 403) or (
+                is_login_request and err.status in (400, 422)
+            ):
                 raise SppGasAuthError("SPP API rejected credentials") from err
             raise SppGasError(f"SPP API returned HTTP {err.status}") from err
         except (ClientError, TimeoutError) as err:

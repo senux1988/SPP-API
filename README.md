@@ -13,10 +13,14 @@ The integration creates one sensor per configured delivery point. The sensor sta
 
 ## Notes
 
-The ZAP capture included authenticated API calls, but not the initial SPP login exchange. The API client keeps authentication isolated in `custom_components/spp_gas/api.py`; if SPP requires the full `account.spp-distribucia.sk` OIDC flow, only that file should need adjustment after testing with a real account.
+Authentication follows the mobile application flow captured from SPP: the integration
+obtains an OAuth token from `login.spp-distribucia.sk` and exchanges it through
+`POST /api/v1/login-web` for the mobile API token. Credentials stay in the Home
+Assistant config entry and are sent only to SPP services.
 
 Captured API endpoints used by the integration:
 
+- `POST https://login.spp-distribucia.sk/oxauth/restv1/token`
+- `POST https://moapbe.spp-distribucia.sk/api/v1/login-web`
 - `GET https://moapbe.spp-distribucia.sk/api/v1/point`
 - `GET https://moapbe.spp-distribucia.sk/api/v1/point/{point_id}/deduction-history?meter=&filter[from]=2017-01-01&filter[to]=YYYY-MM-DD`
-

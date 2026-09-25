@@ -13,7 +13,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import SppGasApiClient, SppGasAuthError, SppGasError, SppGasPoint
 from .const import (
-    CONF_ACCESS_TOKEN,
     CONF_POINT_ID,
     CONF_POINT_NAME,
     CONF_POINT_POD,
@@ -46,7 +45,6 @@ class SppGasConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 async_get_clientsession(self.hass),
                 username=self._auth_data.get(CONF_USERNAME),
                 password=self._auth_data.get(CONF_PASSWORD),
-                access_token=self._auth_data.get(CONF_ACCESS_TOKEN),
             )
             try:
                 self._points = await client.async_get_points()
@@ -68,7 +66,6 @@ class SppGasConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_USERNAME): str,
                     vol.Required(CONF_PASSWORD): str,
-                    vol.Optional(CONF_ACCESS_TOKEN): str,
                 }
             ),
             errors=errors,
