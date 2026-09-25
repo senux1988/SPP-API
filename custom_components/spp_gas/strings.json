@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SPP Gas",
+        "description": "Zadajte prihlasovacie údaje do SPP - distribúcia. Prístupový token je voliteľný fallback pre prvé overenie API.",
+        "data": {
+          "username": "E-mail",
+          "password": "Heslo",
+          "access_token": "Prístupový token"
+        }
+      },
+      "point": {
+        "title": "Odberné miesto",
+        "data": {
+          "point_id": "Odberné miesto"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nepodarilo sa pripojiť k SPP API.",
+      "invalid_auth": "Prihlásenie zlyhalo. API pravdepodobne vyžaduje OIDC prihlasovací tok.",
+      "no_points": "Účet nemá dostupné odberné miesta."
+    },
+    "abort": {
+      "already_configured": "Toto odberné miesto už je nastavené."
+    }
+  }
+}
