@@ -67,4 +67,6 @@ class SppGasTotalReadingSensor(CoordinatorEntity[SppGasCoordinator], SensorEntit
             "reading_date": reading.date,
             "meter": reading.meter,
             "last_period_consumption_m3": reading.consumption,
+            "historical_statistics_id": self.coordinator.statistic_id,
+            "imported_readings": self.coordinator.imported_readings,
         }

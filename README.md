@@ -6,7 +6,8 @@ odpočty plynomera zo služby SPP - distribúcia.
 Integrácia vytvorí pre vybrané odberné miesto senzor s posledným celkovým
 stavom plynomera v metroch kubických. Senzor používa
 `state_class: total_increasing`, takže je vhodný pre dashboardy, dlhodobé
-štatistiky a Energy dashboard Home Assistantu.
+štatistiky a Energy dashboard Home Assistantu. Od verzie `0.2.0` sa zároveň
+spätne importujú všetky odpočty dostupné v SPP.
 
 ## Ako integrácia funguje
 
@@ -20,6 +21,8 @@ stavom plynomera v metroch kubických. Senzor používa
    miesta od `2017-01-01` po aktuálny dátum.
 7. Odpočty zoradí podľa dátumu a stav senzora nastaví na hodnotu `value`
    z najnovšieho záznamu.
+8. Všetky platné odpočty zapíše podľa ich dátumu do externej dlhodobej
+   štatistiky Home Assistantu.
 
 Ak API token prestane platiť, klient sa automaticky prihlási znova a požiadavku
 zopakuje. Prihlasovacie údaje sú uložené v config entry Home Assistantu a
@@ -40,9 +43,29 @@ Integrácia vytvorí senzor `Gas meter reading` s týmito vlastnosťami:
 - `reading_date`: dátum použitého odpočtu
 - `meter`: číslo plynomera
 - `last_period_consumption_m3`: spotreba uvedená pri poslednom odpočte
+- `historical_statistics_id`: ID importovanej dlhodobej štatistiky
+- `imported_readings`: počet odpočtov zaradených do importu
 
 Hodinové načítanie neznamená, že SPP vytvorí nový odpočet každú hodinu. Stav
 senzora sa zmení až vtedy, keď API SPP sprístupní novší odpočet.
+
+## Import historických odpočtov
+
+Pre každé odberné miesto vznikne externá dlhodobá štatistika s ID v tvare:
+
+```text
+spp_gas:<point_id>_gas_consumption
+```
+
+Každý odpočet sa uloží na polnoc jeho dátumu v časovej zóne
+`Europe/Bratislava`. Hodnota `state` obsahuje skutočný stav plynomera a `sum`
+obsahuje kumulatívnu spotrebu od prvého dostupného odpočtu. Prvý odpočet tvorí
+nulový základ. Pri ďalších sa použije spotreba `consumption` vrátená SPP; ak
+chýba, integrácia použije rozdiel stavov rovnakého plynomera.
+
+Celá dostupná história sa kontroluje každú hodinu. Opakovaný import rovnakého
+dátumu aktualizuje existujúci štatistický bod, takže nevytvára duplikáty a vie
+zohľadniť aj neskoršiu opravu odpočtu zo strany SPP.
 
 ## Inštalácia cez HACS
 
@@ -75,9 +98,13 @@ Výsledná štruktúra má vyzerať takto:
         ├── config_flow.py
         ├── const.py
         ├── coordinator.py
+        ├── history.py
         ├── manifest.json
+        ├── models.py
         ├── sensor.py
         ├── strings.json
+        ├── certs/
+        │   └── spp_login_ca_bundle.pem
         └── translations/
             ├── en.json
             └── sk.json
@@ -118,15 +145,17 @@ Ukážkové ID nahraďte skutočným ID entity z Home Assistantu.
 
 ## Energy dashboard
 
-Senzor používa kombináciu `device_class: gas`, jednotku `m³` a
-`state_class: total_increasing`, preto ho možno pridať v:
+V nastavení plynu vyberte importovanú štatistiku pomenovanú podľa odberného
+miesta, napríklad `<názov odberného miesta> gas consumption`:
 
 ```text
 Nastavenia -> Dashboardy -> Energia -> Plyn
 ```
 
-Po prvom vytvorení sa senzor nemusí v ponuke objaviť okamžite. Home Assistant
-najprv potrebuje vytvoriť dlhodobé štatistiky, čo môže trvať približne hodinu.
+Import sa zaradí do fronty recorderu počas prvého načítania integrácie. Nová
+štatistika sa preto nemusí v ponuke objaviť okamžite; zvyčajne stačí niekoľko
+minút. Jej presné ID je dostupné v atribúte `historical_statistics_id` entity
+`Gas meter reading` a v `Vývojárske nástroje -> Štatistiky`.
 
 ## Diagnostika
 
@@ -166,7 +195,8 @@ zostáva zapnuté vrátane kontroly hostname a platnosti certifikátov.
 
 ## Vývojové overenie
 
-Jednotkové testy autentifikácie a obnovy tokenu možno spustiť príkazom:
+Jednotkové testy autentifikácie, obnovy tokenu a historického importu možno
+spustiť príkazom:
 
 ```bash
 python3 -m unittest discover -s tests -v

@@ -138,6 +138,46 @@ class SppGasApiClientTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SppGasAuthError):
             await client.async_login()
 
+    async def test_readings_are_parsed_and_sorted(self) -> None:
+        session = FakeSession(
+            FakeResponse({"access_token": "oauth-token"}),
+            FakeResponse({"access_token": "api-token"}),
+            FakeResponse(
+                {
+                    "data": {
+                        "list": [
+                            {
+                                "date": "2026-09-25",
+                                "value": "21449",
+                                "consumption": "93",
+                                "meter": "123",
+                            },
+                            {"date": "2025-01-01", "value": None},
+                            {"date": "invalid", "value": 21000},
+                            {
+                                "date": "2024-01-15",
+                                "value": 20000,
+                                "consumption": 100,
+                                "meter": "123",
+                            },
+                        ]
+                    }
+                }
+            ),
+        )
+        client = SppGasApiClient(
+            session, username="user@example.com", password="secret"
+        )
+
+        readings = await client.async_get_readings("point-id")
+
+        self.assertEqual(
+            [reading.date for reading in readings],
+            ["2024-01-15", "2026-09-25"],
+        )
+        self.assertEqual(readings[-1].value, 21449.0)
+        self.assertEqual(readings[-1].consumption, 93.0)
+
     async def test_expired_api_token_triggers_one_new_login(self) -> None:
         session = FakeSession(
             FakeResponse({"access_token": "oauth-token-1"}),

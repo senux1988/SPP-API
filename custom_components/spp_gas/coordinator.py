@@ -3,21 +3,35 @@
 from __future__ import annotations
 
 import logging
+import re
 
+from homeassistant.components.recorder.models import (
+    StatisticData,
+    StatisticMeanType,
+    StatisticMetaData,
+)
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+)
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util.unit_conversion import VolumeConverter
 
-from .api import SppGasApiClient, SppGasError, SppGasReading
+from .api import SppGasApiClient, SppGasError
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_PASSWORD,
     CONF_POINT_ID,
+    CONF_POINT_NAME,
     CONF_USERNAME,
     DOMAIN,
     UPDATE_INTERVAL,
 )
+from .history import build_historical_points
+from .models import SppGasReading
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +47,11 @@ class SppGasCoordinator(DataUpdateCoordinator[SppGasReading | None]):
             update_interval=UPDATE_INTERVAL,
         )
         self.entry = entry
+        point_slug = re.sub(
+            r"[^a-z0-9_]+", "_", entry.data[CONF_POINT_ID].lower()
+        ).strip("_")
+        self.statistic_id = f"{DOMAIN}:{point_slug}_gas_consumption"
+        self.imported_readings = 0
         self.client = SppGasApiClient(
             async_get_clientsession(hass),
             username=entry.data.get(CONF_USERNAME),
@@ -42,8 +61,45 @@ class SppGasCoordinator(DataUpdateCoordinator[SppGasReading | None]):
 
     async def _async_update_data(self) -> SppGasReading | None:
         try:
-            return await self.client.async_get_latest_reading(
+            readings = await self.client.async_get_readings(
                 self.entry.data[CONF_POINT_ID]
             )
         except SppGasError as err:
             raise UpdateFailed(str(err)) from err
+
+        self._async_import_history(readings)
+        return readings[-1] if readings else None
+
+    def _async_import_history(self, readings: list[SppGasReading]) -> None:
+        """Import dated SPP readings into long-term statistics."""
+        if "recorder" not in self.hass.config.components:
+            _LOGGER.debug("Recorder is disabled; skipping SPP history import")
+            return
+
+        points = build_historical_points(readings)
+        if not points:
+            return
+
+        metadata = StatisticMetaData(
+            mean_type=StatisticMeanType.NONE,
+            has_sum=True,
+            name=(
+                f"{self.entry.data.get(CONF_POINT_NAME, 'SPP gas point')} "
+                "gas consumption"
+            ),
+            source=DOMAIN,
+            statistic_id=self.statistic_id,
+            unit_class=VolumeConverter.UNIT_CLASS,
+            unit_of_measurement=UnitOfVolume.CUBIC_METERS,
+        )
+        statistics = [
+            StatisticData(start=point.start, state=point.state, sum=point.sum)
+            for point in points
+        ]
+        async_add_external_statistics(self.hass, metadata, statistics)
+        self.imported_readings = len(statistics)
+        _LOGGER.debug(
+            "Queued %d SPP readings for statistic %s",
+            self.imported_readings,
+            self.statistic_id,
+        )

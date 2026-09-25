@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
 import hashlib
@@ -14,6 +13,7 @@ from typing import Any
 from aiohttp import ClientError, ClientResponseError, ClientSession
 
 from .const import DEFAULT_APP_VERSION
+from .models import SppGasPoint, SppGasReading
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,38 +35,6 @@ class SppGasAuthError(SppGasError):
 
 class SppGasConnectionError(SppGasError):
     """Connection to an SPP service failed."""
-
-
-@dataclass(frozen=True)
-class SppGasPoint:
-    """SPP delivery point."""
-
-    id: str
-    name: str
-    pod: str | None
-    address: str | None
-    meter: str | None
-
-    @property
-    def label(self) -> str:
-        """Return a user-friendly point label."""
-        parts = [self.name]
-        if self.address:
-            parts.append(self.address)
-        if self.pod:
-            parts.append(self.pod)
-        return " - ".join(part for part in parts if part)
-
-
-@dataclass(frozen=True)
-class SppGasReading:
-    """Latest meter reading."""
-
-    date: str
-    value: float
-    meter: str | None
-    consumption: float | None
-    raw: dict[str, Any]
 
 
 class SppGasApiClient:
@@ -140,8 +108,8 @@ class SppGasApiClient:
             raise SppGasError("Unexpected points response")
         return [_parse_point(point) for point in data if isinstance(point, dict)]
 
-    async def async_get_latest_reading(self, point_id: str) -> SppGasReading | None:
-        """Return the latest reading for a point."""
+    async def async_get_readings(self, point_id: str) -> list[SppGasReading]:
+        """Return all available readings for a point, oldest first."""
         await self.async_login()
         today = date.today().isoformat()
         payload = await self._request(
@@ -153,22 +121,40 @@ class SppGasApiClient:
         if not isinstance(data, dict):
             raise SppGasError("Unexpected deduction history response")
         readings = data.get("list") or []
-        if not isinstance(readings, list) or not readings:
-            return None
+        if not isinstance(readings, list):
+            raise SppGasError("Unexpected deduction history list")
 
-        parsed = [reading for reading in readings if isinstance(reading, dict)]
-        parsed.sort(key=lambda item: str(item.get("date") or ""))
-        latest = parsed[-1]
-        value = _as_float(latest.get("value"))
-        if value is None:
-            return None
-        return SppGasReading(
-            date=str(latest.get("date") or ""),
-            value=value,
-            meter=_as_str(latest.get("meter")),
-            consumption=_as_float(latest.get("consumption")),
-            raw=latest,
-        )
+        parsed: list[SppGasReading] = []
+        for raw_reading in readings:
+            if not isinstance(raw_reading, dict):
+                continue
+            reading_date = _as_str(raw_reading.get("date"))
+            value = _as_float(raw_reading.get("value"))
+            if not reading_date or value is None:
+                continue
+            try:
+                date.fromisoformat(reading_date[:10])
+            except ValueError:
+                _LOGGER.warning(
+                    "Skipping SPP reading with invalid date %r", reading_date
+                )
+                continue
+            parsed.append(
+                SppGasReading(
+                    date=reading_date,
+                    value=value,
+                    meter=_as_str(raw_reading.get("meter")),
+                    consumption=_as_float(raw_reading.get("consumption")),
+                    raw=raw_reading,
+                )
+            )
+        parsed.sort(key=lambda reading: reading.date)
+        return parsed
+
+    async def async_get_latest_reading(self, point_id: str) -> SppGasReading | None:
+        """Return the latest reading for a point."""
+        readings = await self.async_get_readings(point_id)
+        return readings[-1] if readings else None
 
     async def _request(
         self,
@@ -260,7 +246,7 @@ def _unwrap_data(payload: Any) -> Any:
 
 @lru_cache(maxsize=1)
 def _auth_ssl_context() -> ssl.SSLContext:
-    """Build a verified context with the intermediate omitted by SPP's server."""
+    """Build a verified context with the CA chain omitted by SPP's server."""
     context = ssl.create_default_context()
     context.load_verify_locations(cafile=str(AUTH_CA_BUNDLE))
     return context

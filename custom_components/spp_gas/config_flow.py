@@ -17,7 +17,6 @@ from .api import (
     SppGasAuthError,
     SppGasConnectionError,
     SppGasError,
-    SppGasPoint,
 )
 from .const import (
     CONF_POINT_ID,
@@ -25,6 +24,7 @@ from .const import (
     CONF_POINT_POD,
     DOMAIN,
 )
+from .models import SppGasPoint
 
 _LOGGER = logging.getLogger(__name__)
 
