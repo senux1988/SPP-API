@@ -45,6 +45,8 @@ Integrácia vytvorí senzor `Gas meter reading` s týmito vlastnosťami:
 - `last_period_consumption_m3`: spotreba uvedená pri poslednom odpočte
 - `historical_statistics_id`: ID importovanej dlhodobej štatistiky
 - `imported_readings`: počet odpočtov zaradených do importu
+- `sampled_historical_statistics_id`: ID denne rozpočítanej štatistiky
+- `imported_sampled_readings`: počet importovaných denných bodov
 
 Hodinové načítanie neznamená, že SPP vytvorí nový odpočet každú hodinu. Stav
 senzora sa zmení až vtedy, keď API SPP sprístupní novší odpočet.
@@ -66,6 +68,18 @@ chýba, integrácia použije rozdiel stavov rovnakého plynomera.
 Celá dostupná história sa kontroluje každú hodinu. Opakovaný import rovnakého
 dátumu aktualizuje existujúci štatistický bod, takže nevytvára duplikáty a vie
 zohľadniť aj neskoršiu opravu odpočtu zo strany SPP.
+
+Zároveň vznikne druhá štatistika s rovnomerne rozpočítanou dennou spotrebou:
+
+```text
+spp_gas:<point_id>_gas_consumption_vzorkovana
+```
+
+Spotreba medzi dvoma odpočtami sa vydelí počtom kalendárnych dní. Napríklad
+prírastok 30 m³ medzi 1. a 4. januárom vytvorí spotrebu 10 m³ pre 2., 3. a
+4. január. Štatistika má bod na miestnej polnoci každého dňa a jej `state` aj
+`sum` obsahujú kumulatívnu rozpočítanú spotrebu. Po poslednom známom odpočte
+integrácia ďalšiu spotrebu neodhaduje.
 
 ## Inštalácia cez HACS
 
@@ -145,8 +159,9 @@ Ukážkové ID nahraďte skutočným ID entity z Home Assistantu.
 
 ## Energy dashboard
 
-V nastavení plynu vyberte importovanú štatistiku pomenovanú podľa odberného
-miesta, napríklad `<názov odberného miesta> gas consumption`:
+V nastavení plynu vyberte denne rozpočítanú štatistiku pomenovanú podľa
+odberného miesta, napríklad
+`<názov odberného miesta> gas consumption (daily average)`:
 
 ```text
 Nastavenia -> Dashboardy -> Energia -> Plyn
@@ -154,8 +169,11 @@ Nastavenia -> Dashboardy -> Energia -> Plyn
 
 Import sa zaradí do fronty recorderu počas prvého načítania integrácie. Nová
 štatistika sa preto nemusí v ponuke objaviť okamžite; zvyčajne stačí niekoľko
-minút. Jej presné ID je dostupné v atribúte `historical_statistics_id` entity
-`Gas meter reading` a v `Vývojárske nástroje -> Štatistiky`.
+minút. Jej presné ID je dostupné v atribúte
+`sampled_historical_statistics_id` entity `Gas meter reading` a v
+`Vývojárske nástroje -> Štatistiky`. Pôvodná štatistika s bodmi iba v dňoch
+skutočných odpočtov zostáva dostupná pod názvom
+`<názov odberného miesta> gas consumption`.
 
 ## Diagnostika
 

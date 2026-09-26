@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import logging
 from zoneinfo import ZoneInfo
 
@@ -27,16 +27,7 @@ def build_historical_points(
     readings: list[SppGasReading],
 ) -> list[SppGasHistoricalPoint]:
     """Build ordered, monotonic statistics from dated meter readings."""
-    readings_by_date: dict[date, SppGasReading] = {}
-    for reading in readings:
-        try:
-            reading_date = date.fromisoformat(reading.date[:10])
-        except ValueError:
-            _LOGGER.warning("Skipping SPP reading with invalid date %r", reading.date)
-            continue
-        readings_by_date[reading_date] = reading
-
-    ordered = sorted(readings_by_date.items())
+    ordered = _ordered_readings(readings)
     if not ordered:
         return []
 
@@ -46,21 +37,11 @@ def build_historical_points(
 
     for reading_date, reading in ordered:
         if previous is not None:
-            interval_consumption = reading.consumption
-            if interval_consumption is None or interval_consumption < 0:
-                if (
-                    reading.meter == previous.meter
-                    and reading.value >= previous.value
-                ):
-                    interval_consumption = reading.value - previous.value
-                else:
-                    interval_consumption = 0.0
-            cumulative_sum += interval_consumption
+            cumulative_sum += _interval_consumption(previous, reading)
 
-        local_start = datetime.combine(reading_date, time.min, SPP_TIME_ZONE)
         points.append(
             SppGasHistoricalPoint(
-                start=local_start.astimezone(timezone.utc),
+                start=_local_midnight_utc(reading_date),
                 state=reading.value,
                 sum=cumulative_sum,
             )
@@ -68,3 +49,81 @@ def build_historical_points(
         previous = reading
 
     return points
+
+
+def build_sampled_historical_points(
+    readings: list[SppGasReading],
+) -> list[SppGasHistoricalPoint]:
+    """Distribute each reading interval evenly across its calendar days."""
+    ordered = _ordered_readings(readings)
+    if not ordered:
+        return []
+
+    first_date, first_reading = ordered[0]
+    points = [
+        SppGasHistoricalPoint(
+            start=_local_midnight_utc(first_date),
+            state=0.0,
+            sum=0.0,
+        )
+    ]
+    cumulative_sum = 0.0
+    previous_date = first_date
+    previous_reading = first_reading
+
+    for reading_date, reading in ordered[1:]:
+        day_count = (reading_date - previous_date).days
+        interval_consumption = _interval_consumption(previous_reading, reading)
+        interval_start_sum = cumulative_sum
+
+        for day_offset in range(1, day_count + 1):
+            point_date = previous_date + timedelta(days=day_offset)
+            cumulative_sum = (
+                interval_start_sum
+                + interval_consumption * day_offset / day_count
+            )
+            points.append(
+                SppGasHistoricalPoint(
+                    start=_local_midnight_utc(point_date),
+                    state=cumulative_sum,
+                    sum=cumulative_sum,
+                )
+            )
+
+        previous_date = reading_date
+        previous_reading = reading
+
+    return points
+
+
+def _ordered_readings(
+    readings: list[SppGasReading],
+) -> list[tuple[date, SppGasReading]]:
+    """Return readings sorted by date, keeping the last duplicate."""
+    readings_by_date: dict[date, SppGasReading] = {}
+    for reading in readings:
+        try:
+            reading_date = date.fromisoformat(reading.date[:10])
+        except ValueError:
+            _LOGGER.warning("Skipping SPP reading with invalid date %r", reading.date)
+            continue
+        readings_by_date[reading_date] = reading
+
+    return sorted(readings_by_date.items())
+
+
+def _interval_consumption(
+    previous: SppGasReading, current: SppGasReading
+) -> float:
+    """Return consumption between two readings using the SPP fallback rules."""
+    if current.consumption is not None and current.consumption >= 0:
+        return current.consumption
+    if current.meter == previous.meter and current.value >= previous.value:
+        return current.value - previous.value
+    return 0.0
+
+
+def _local_midnight_utc(reading_date: date) -> datetime:
+    """Convert midnight in the SPP timezone to UTC."""
+    local_start = datetime.combine(reading_date, time.min, SPP_TIME_ZONE)
+    return local_start.astimezone(timezone.utc)

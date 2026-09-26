@@ -30,7 +30,11 @@ from .const import (
     DOMAIN,
     UPDATE_INTERVAL,
 )
-from .history import build_historical_points
+from .history import (
+    SppGasHistoricalPoint,
+    build_historical_points,
+    build_sampled_historical_points,
+)
 from .models import SppGasReading
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,7 +55,9 @@ class SppGasCoordinator(DataUpdateCoordinator[SppGasReading | None]):
             r"[^a-z0-9_]+", "_", entry.data[CONF_POINT_ID].lower()
         ).strip("_")
         self.statistic_id = f"{DOMAIN}:{point_slug}_gas_consumption"
+        self.sampled_statistic_id = f"{self.statistic_id}_vzorkovana"
         self.imported_readings = 0
+        self.imported_sampled_readings = 0
         self.client = SppGasApiClient(
             async_get_clientsession(hass),
             username=entry.data.get(CONF_USERNAME),
@@ -77,18 +83,41 @@ class SppGasCoordinator(DataUpdateCoordinator[SppGasReading | None]):
             return
 
         points = build_historical_points(readings)
-        if not points:
-            return
-
-        metadata = StatisticMetaData(
-            mean_type=StatisticMeanType.NONE,
-            has_sum=True,
+        self.imported_readings = self._async_import_statistics(
+            statistic_id=self.statistic_id,
             name=(
                 f"{self.entry.data.get(CONF_POINT_NAME, 'SPP gas point')} "
                 "gas consumption"
             ),
+            points=points,
+        )
+        sampled_points = build_sampled_historical_points(readings)
+        self.imported_sampled_readings = self._async_import_statistics(
+            statistic_id=self.sampled_statistic_id,
+            name=(
+                f"{self.entry.data.get(CONF_POINT_NAME, 'SPP gas point')} "
+                "gas consumption (daily average)"
+            ),
+            points=sampled_points,
+        )
+
+    def _async_import_statistics(
+        self,
+        *,
+        statistic_id: str,
+        name: str,
+        points: list[SppGasHistoricalPoint],
+    ) -> int:
+        """Queue one set of external statistics for recorder import."""
+        if not points:
+            return 0
+
+        metadata = StatisticMetaData(
+            mean_type=StatisticMeanType.NONE,
+            has_sum=True,
+            name=name,
             source=DOMAIN,
-            statistic_id=self.statistic_id,
+            statistic_id=statistic_id,
             unit_class=VolumeConverter.UNIT_CLASS,
             unit_of_measurement=UnitOfVolume.CUBIC_METERS,
         )
@@ -97,9 +126,9 @@ class SppGasCoordinator(DataUpdateCoordinator[SppGasReading | None]):
             for point in points
         ]
         async_add_external_statistics(self.hass, metadata, statistics)
-        self.imported_readings = len(statistics)
         _LOGGER.debug(
             "Queued %d SPP readings for statistic %s",
-            self.imported_readings,
-            self.statistic_id,
+            len(statistics),
+            statistic_id,
         )
+        return len(statistics)
